@@ -67,15 +67,43 @@ class VectorStore:
         embeddings = [chunk['embedding'] for chunk in chunks]
         metadatas = [chunk['metadata'] for chunk in chunks]
 
-        self.collection.add(
-            ids=chunk_ids,
-            embeddings=embeddings,
-            documents=contents,
-            metadatas=metadatas
-        )
+        try:
+            self.collection.add(
+                ids=chunk_ids,
+                embeddings=embeddings,
+                documents=contents,
+                metadatas=metadatas
+            )
 
-        log.info(f"Added {len(chunks)} chunks to vector database")
-        return len(chunks)
+            log.info(f"Added {len(chunks)} chunks to vector database")
+            return len(chunks)
+
+        except Exception as e:
+            # Auto-recovery: if collection was deleted (e.g., by reset), recreate it
+            if "does not exist" in str(e).lower():
+                log.warning(f"Collection '{self.collection_name}' not found, recreating...")
+
+                # Recreate the collection
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name,
+                    embedding_function=self.embedding_function,
+                    metadata={"hnsw:space": "l2"}
+                )
+                log.info(f"Collection '{self.collection_name}' recreated successfully")
+
+                # Retry the add operation
+                self.collection.add(
+                    ids=chunk_ids,
+                    embeddings=embeddings,
+                    documents=contents,
+                    metadatas=metadatas
+                )
+
+                log.info(f"Added {len(chunks)} chunks to vector database (after recovery)")
+                return len(chunks)
+            else:
+                # Other error, re-raise
+                raise
 
     def search(
         self,
@@ -94,14 +122,30 @@ class VectorStore:
         Returns:
             Dictionary with 'documents', 'metadatas', and 'distances'
         """
-        results = self.collection.query(
-            query_embeddings=[query_embedding],
-            n_results=n_results,
-            where=where
-        )
+        try:
+            results = self.collection.query(
+                query_embeddings=[query_embedding],
+                n_results=n_results,
+                where=where
+            )
 
-        log.debug(f"Search returned {len(results['documents'][0])} results")
-        return results
+            log.debug(f"Search returned {len(results['documents'][0])} results")
+            return results
+
+        except Exception as e:
+            # Auto-recovery: if collection was deleted, recreate and return empty results
+            if "does not exist" in str(e).lower():
+                log.warning(f"Collection '{self.collection_name}' not found during search(), recreating...")
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name,
+                    embedding_function=self.embedding_function,
+                    metadata={"hnsw:space": "l2"}
+                )
+                log.info(f"Collection '{self.collection_name}' recreated successfully")
+                # Return empty results
+                return {'documents': [[]], 'metadatas': [[]], 'distances': [[]]}
+            else:
+                raise
 
     def get_by_source_url(self, source_url: str) -> Dict[str, Any]:
         """
@@ -174,7 +218,21 @@ class VectorStore:
         Returns:
             Total count of chunks
         """
-        return self.collection.count()
+        try:
+            return self.collection.count()
+        except Exception as e:
+            # Auto-recovery: if collection was deleted, recreate and return 0
+            if "does not exist" in str(e).lower():
+                log.warning(f"Collection '{self.collection_name}' not found during count(), recreating...")
+                self.collection = self.client.get_or_create_collection(
+                    name=self.collection_name,
+                    embedding_function=self.embedding_function,
+                    metadata={"hnsw:space": "l2"}
+                )
+                log.info(f"Collection '{self.collection_name}' recreated successfully")
+                return 0
+            else:
+                raise
 
     def get_stats(self) -> Dict[str, Any]:
         """
