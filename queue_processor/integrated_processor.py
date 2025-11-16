@@ -61,6 +61,11 @@ class IntegratedProcessor:
             if source_type == 'website' and not is_discovered and self.web_crawler.should_crawl_domain(url):
                 return await self._process_website_crawl(url, url_obj)
 
+            # Inform user when scraping a website (single page) instead of crawling
+            if source_type == 'website' and not is_discovered:
+                log.info(f"ℹ️  Single page scrape (not detected as documentation site)")
+                log.info(f"   💡 Crawling triggers for: docs.*, wiki, tutorial, blog, readthedocs, etc.")
+
             # Step 1: Scrape content
             scraper = self.scrapers.get(source_type)
             if not scraper:

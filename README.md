@@ -21,6 +21,43 @@ Système RAG (Retrieval-Augmented Generation) local et intelligent pour l'ingest
 - **Refresh automatique** : Maintien à jour hebdomadaire
 - **Interface MCP** : Compatible Claude Code et chat custom
 
+## ⚙️ Comportement du crawling
+
+Le système décide automatiquement de crawler ou scraper selon le type de site :
+
+### 🕷️ Sites crawlés (découverte automatique de toutes les pages)
+
+**Sites de documentation :**
+- Domaines : `docs.*`, `doc.*`, `wiki`, `confluence`
+- Plateformes : `readthedocs`, `gitbook`, `notion.site`, `readme.io`
+- Guides : URLs contenant `/tutorial`, `/guide`, `/learn`
+- Blogs : URLs contenant `/blog`, `/article`, `/post`, `/news`
+
+**Exemples :**
+- ✅ `https://docs.asterisk.org` → Crawl jusqu'à 1000 pages
+- ✅ `https://fastapi.tiangolo.com/tutorial/` → Crawl complet de la section
+- ✅ `https://docs.python.org` → Découverte de toute la documentation
+- ✅ `https://example.com/blog` → Crawl de tous les articles
+
+**Résultat :** Découvre 50-1000 pages automatiquement, les ajoute à la queue pour scraping ultérieur.
+
+### 📄 Sites scrapés (page unique seulement)
+
+**Tous les autres sites web** qui ne correspondent pas aux patterns ci-dessus.
+
+**Exemples :**
+- ⚠️ `https://company.com/product` → Scrape de cette page uniquement
+- ⚠️ `https://blog.example.com/article-123` → Page unique
+- ⚠️ `https://github.com/user/repo` → README + dossier docs
+
+**Résultat :** Extrait le contenu de cette URL seulement, pas de découverte de pages liées.
+
+### 💡 Astuce
+
+Pour les sites qui ne sont pas détectés comme documentation mais que vous souhaitez indexer entièrement :
+1. Ajoutez manuellement les URLs des pages importantes
+2. Ou utilisez une recherche par prompt (ex: "tutoriels FastAPI") qui découvrira automatiquement du contenu
+
 ## 🐛 Corrections récentes (v1.0)
 
 ### Bugs critiques corrigés
