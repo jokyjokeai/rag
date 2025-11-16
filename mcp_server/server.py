@@ -55,6 +55,21 @@ async def list_tools() -> list[types.Tool]:
                         "enum": ["all", "beginner", "intermediate", "advanced"],
                         "description": "Filter by difficulty level (default: all)",
                         "default": "all"
+                    },
+                    "enable_reranking": {
+                        "type": "boolean",
+                        "description": "Enable cross-encoder reranking for better accuracy (recommended: true). Default: true",
+                        "default": True
+                    },
+                    "enable_hybrid": {
+                        "type": "boolean",
+                        "description": "Enable hybrid search (semantic + keyword fusion). Use for exact term matching. Default: false",
+                        "default": False
+                    },
+                    "enable_query_expansion": {
+                        "type": "boolean",
+                        "description": "Expand query with LLM for better recall. Useful for short queries. Default: false",
+                        "default": False
                     }
                 },
                 "required": ["query"]
@@ -99,8 +114,12 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         n_results = arguments.get("n_results", 20)
         source_type = arguments.get("source_type", "all")
         difficulty = arguments.get("difficulty", "all")
+        enable_reranking = arguments.get("enable_reranking", True)
+        enable_hybrid = arguments.get("enable_hybrid", False)
+        enable_query_expansion = arguments.get("enable_query_expansion", False)
 
-        log.info(f"Searching RAG: '{query}' (n={n_results}, type={source_type})")
+        log.info(f"Searching RAG: '{query}' (n={n_results}, type={source_type}, "
+                f"rerank={enable_reranking}, hybrid={enable_hybrid}, expand={enable_query_expansion})")
 
         # Build filters
         where_filter = {}
@@ -116,11 +135,14 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
         if difficulty != "all":
             where_filter["difficulty"] = difficulty
 
-        # Search
+        # Search with new improvements
         results = rag_system.search(
             query=query,
             n_results=n_results,
-            filters=where_filter if where_filter else None
+            filters=where_filter if where_filter else None,
+            enable_reranking=enable_reranking,
+            enable_hybrid=enable_hybrid,
+            enable_query_expansion=enable_query_expansion
         )
 
         # Format results
@@ -131,12 +153,22 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             )]
 
         formatted_results = []
+
+        # Check if reranking was applied
+        has_rerank_scores = 'rerank_scores' in results and results['rerank_scores']
+
         for i, (doc, meta, distance) in enumerate(zip(
             results['documents'][0],
             results['metadatas'][0],
             results.get('distances', [[0]*len(results['documents'][0])])[0]
         )):
-            score = 1 - distance if distance else 1.0
+            # Use rerank score if available, otherwise use similarity score
+            if has_rerank_scores:
+                score = results['rerank_scores'][i]
+                score_label = "Rerank Score"
+            else:
+                score = 1 - distance if distance else 1.0
+                score_label = "Similarity"
 
             # Handle topics (stored as comma-separated string in ChromaDB)
             topics = meta.get('topics', '')
@@ -148,7 +180,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
                 topics_str = 'N/A'
 
             formatted_results.append(f"""
-### Result {i+1} (Score: {score:.2f})
+### Result {i+1} ({score_label}: {score:.2f})
 
 **Source:** {meta.get('source_url', 'N/A')}
 **Type:** {meta.get('source_type', 'N/A')} | **Difficulty:** {meta.get('difficulty', 'N/A')}

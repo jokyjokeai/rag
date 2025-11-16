@@ -154,11 +154,12 @@ async def main():
                                 similarity_percent = similarity_score * 100
 
                                 # Color-code based on similarity
-                                if similarity_percent >= 80:
+                                # Adjusted thresholds for semantic search (lower is more realistic)
+                                if similarity_percent >= 65:
                                     indicator = "🟢 Excellente"
-                                elif similarity_percent >= 60:
+                                elif similarity_percent >= 50:
                                     indicator = "🟡 Bonne"
-                                elif similarity_percent >= 40:
+                                elif similarity_percent >= 35:
                                     indicator = "🟠 Moyenne"
                                 else:
                                     indicator = "🔴 Faible"

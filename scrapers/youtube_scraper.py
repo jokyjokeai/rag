@@ -11,6 +11,7 @@ from googleapiclient.errors import HttpError
 from config import settings
 from utils import log, extract_youtube_video_id
 from .base_scraper import BaseScraper
+import requests
 
 
 class YouTubeScraper(BaseScraper):
@@ -25,6 +26,64 @@ class YouTubeScraper(BaseScraper):
         else:
             self.youtube = None
             log.warning("YouTube API key not configured - metadata will be limited")
+
+    @staticmethod
+    def is_temporary_error(error_message: str) -> bool:
+        """
+        Determine if an error is temporary (retriable) or permanent.
+
+        Args:
+            error_message: The error message string
+
+        Returns:
+            True if error is temporary (should retry), False if permanent
+        """
+        error_lower = error_message.lower()
+
+        # Temporary errors (retriable)
+        temporary_indicators = [
+            'rate limit',
+            'quota',
+            'too many requests',
+            'blocked',
+            'ip',
+            'timeout',
+            'timed out',
+            'connection',
+            'network',
+            '429',  # Too Many Requests
+            '503',  # Service Unavailable
+            '502',  # Bad Gateway
+            '504',  # Gateway Timeout
+            'server error',
+            'temporarily unavailable',
+            'try again later'
+        ]
+
+        # Permanent errors (not retriable)
+        permanent_indicators = [
+            'video unavailable',
+            'private video',
+            'deleted',
+            'removed',
+            '404',  # Not Found
+            'no transcript',
+            'transcripts disabled',
+            'invalid',
+            'not found',
+            'copyright'
+        ]
+
+        # Check for permanent errors first (higher priority)
+        if any(indicator in error_lower for indicator in permanent_indicators):
+            return False
+
+        # Check for temporary errors
+        if any(indicator in error_lower for indicator in temporary_indicators):
+            return True
+
+        # Default: treat unknown errors as temporary (safer to retry)
+        return True
 
     def scrape(self, url: str) -> Optional[Dict[str, Any]]:
         """
@@ -49,54 +108,71 @@ class YouTubeScraper(BaseScraper):
 
         log.info(f"Scraping YouTube video: {video_id}")
 
-        # Add random delay to simulate human behavior and avoid rate limiting
-        # Varies the delay to appear more natural (80-120% of configured delay)
-        base_delay = settings.youtube_delay_between_requests
-        random_delay = base_delay * random.uniform(0.8, 1.2)
-        time.sleep(random_delay)
+        try:
+            # Add random delay to simulate human behavior and avoid rate limiting
+            # Varies the delay to appear more natural (80-120% of configured delay)
+            base_delay = settings.youtube_delay_between_requests
+            random_delay = base_delay * random.uniform(0.8, 1.2)
+            time.sleep(random_delay)
 
-        # Get transcript
-        transcript_result = self._get_transcript(video_id)
+            # Get transcript
+            transcript_result = self._get_transcript(video_id)
 
-        # Get metadata from API if available
-        metadata = self._get_metadata(video_id)
+            # Get metadata from API if available
+            metadata = self._get_metadata(video_id)
 
-        if transcript_result['success']:
-            # Combine transcript and metadata
-            full_metadata = {
-                **metadata,
-                'video_id': video_id,
-                'source_type': 'youtube_video',
-                'scraped_at': datetime.now().isoformat(),
-                'has_transcript': True,
-                'transcript_segments': transcript_result.get('segments', [])
-            }
+            if transcript_result['success']:
+                # Combine transcript and metadata
+                full_metadata = {
+                    **metadata,
+                    'video_id': video_id,
+                    'source_type': 'youtube_video',
+                    'scraped_at': datetime.now().isoformat(),
+                    'has_transcript': True,
+                    'transcript_segments': transcript_result.get('segments', [])
+                }
+
+                return self._create_result(
+                    url=url,
+                    content=transcript_result['content'],
+                    metadata=full_metadata,
+                    success=True
+                )
+            else:
+                # Transcript failed - use description as fallback
+                description = metadata.get('description', '')
+                full_metadata = {
+                    **metadata,
+                    'video_id': video_id,
+                    'source_type': 'youtube_video',
+                    'scraped_at': datetime.now().isoformat(),
+                    'has_transcript': False,
+                    'fallback': 'description'
+                }
+
+                content = f"# {metadata.get('title', 'YouTube Video')}\n\n{description}"
+
+                return self._create_result(
+                    url=url,
+                    content=content,
+                    metadata=full_metadata,
+                    success=True  # Still successful, just using fallback
+                )
+
+        except Exception as e:
+            error_msg = str(e)
+            log.error(f"Error scraping YouTube video {video_id}: {error_msg}")
+
+            # Determine if error is temporary
+            is_temp = self.is_temporary_error(error_msg)
 
             return self._create_result(
                 url=url,
-                content=transcript_result['content'],
-                metadata=full_metadata,
-                success=True
-            )
-        else:
-            # Transcript failed - use description as fallback
-            description = metadata.get('description', '')
-            full_metadata = {
-                **metadata,
-                'video_id': video_id,
-                'source_type': 'youtube_video',
-                'scraped_at': datetime.now().isoformat(),
-                'has_transcript': False,
-                'fallback': 'description'
-            }
-
-            content = f"# {metadata.get('title', 'YouTube Video')}\n\n{description}"
-
-            return self._create_result(
-                url=url,
-                content=content,
-                metadata=full_metadata,
-                success=True  # Still successful, just using fallback
+                content="",
+                metadata={},
+                success=False,
+                error=error_msg,
+                is_temporary_error=is_temp
             )
 
     def _get_transcript(self, video_id: str) -> Dict[str, Any]:

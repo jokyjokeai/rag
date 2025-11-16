@@ -47,7 +47,9 @@ class Settings(BaseSettings):
     chunk_overlap: int = 50    # tokens
 
     # Embeddings Configuration
-    embedding_model: str = "all-MiniLM-L6-v2"
+    # MPNet provides better accuracy (+10-15%) than MiniLM, at the cost of being 2x slower
+    # Dimensions: 768 (MPNet) vs 384 (MiniLM) - better semantic understanding
+    embedding_model: str = "all-mpnet-base-v2"
     embedding_device: str = "cpu"  # or 'cuda' for GPU
 
     # Refresh Scheduler Configuration

@@ -40,7 +40,8 @@ class BaseScraper(ABC):
         content: str,
         metadata: Dict[str, Any],
         success: bool = True,
-        error: Optional[str] = None
+        error: Optional[str] = None,
+        is_temporary_error: bool = False
     ) -> Dict[str, Any]:
         """
         Create standardized result dictionary.
@@ -51,6 +52,7 @@ class BaseScraper(ABC):
             metadata: Metadata dictionary
             success: Whether scraping succeeded
             error: Error message if failed
+            is_temporary_error: True if error is temporary (retriable)
 
         Returns:
             Standardized result dictionary
@@ -60,5 +62,6 @@ class BaseScraper(ABC):
             'content': content,
             'metadata': metadata,
             'success': success,
-            'error': error
+            'error': error,
+            'is_temporary_error': is_temporary_error
         }

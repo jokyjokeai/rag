@@ -35,6 +35,50 @@ class IntegratedProcessor:
 
         log.info("IntegratedProcessor initialized")
 
+    def _handle_scrape_error(self, url_obj: DiscoveredURL, error_msg: str, is_temporary: bool):
+        """
+        Handle scraping errors with retry logic for temporary failures.
+
+        Args:
+            url_obj: DiscoveredURL object
+            error_msg: Error message
+            is_temporary: True if error is temporary (retriable)
+        """
+        MAX_RETRIES = 3
+
+        if is_temporary and url_obj.retry_count < MAX_RETRIES:
+            # Temporary error - retry with backoff
+            new_retry_count = url_obj.retry_count + 1
+
+            # Calculate backoff delay (exponential: 60s, 300s, 900s)
+            backoff_seconds = 60 * (5 ** (new_retry_count - 1))
+
+            log.warning(
+                f"⏳ Temporary error for {url_obj.url} (retry {new_retry_count}/{MAX_RETRIES}). "
+                f"Will retry in {backoff_seconds}s. Error: {error_msg}"
+            )
+
+            # Reset to pending with incremented retry count
+            cursor = self.url_db.conn.cursor()
+            cursor.execute("""
+                UPDATE discovered_urls
+                SET status = 'pending',
+                    retry_count = ?,
+                    error_message = ?
+                WHERE url_hash = ?
+            """, (new_retry_count, f"Retry {new_retry_count}/{MAX_RETRIES}: {error_msg}", url_obj.url_hash))
+            self.url_db.conn.commit()
+        else:
+            # Permanent error OR max retries reached
+            if url_obj.retry_count >= MAX_RETRIES:
+                final_msg = f"Failed after {MAX_RETRIES} retries: {error_msg}"
+                log.error(f"❌ {url_obj.url}: {final_msg}")
+            else:
+                final_msg = f"Permanent error: {error_msg}"
+                log.error(f"❌ {url_obj.url}: {final_msg}")
+
+            self.url_db.update_url_status(url_obj.url_hash, 'failed', final_msg)
+
     async def process_url(self, url_obj: DiscoveredURL) -> Dict[str, Any]:
         """
         Process a single URL through full pipeline.
@@ -77,8 +121,11 @@ class IntegratedProcessor:
 
             if not scrape_result or not scrape_result.get('success'):
                 error_msg = scrape_result.get('error', 'Scraping failed') if scrape_result else 'Scraper returned None'
-                self.url_db.update_url_status(url_obj.url_hash, 'failed', error_msg)
-                return {'success': False, 'url': url, 'error': error_msg}
+                is_temporary = scrape_result.get('is_temporary_error', False) if scrape_result else False
+
+                # Handle retry logic for temporary errors
+                self._handle_scrape_error(url_obj, error_msg, is_temporary)
+                return {'success': False, 'url': url, 'error': error_msg, 'will_retry': is_temporary and url_obj.retry_count < 3}
 
             # Step 2: Process content (chunk + embed + store)
             process_result = await asyncio.to_thread(
@@ -107,9 +154,17 @@ class IntegratedProcessor:
                 return {'success': False, 'url': url, 'error': error_msg}
 
         except Exception as e:
-            log.error(f"Error processing {url}: {e}")
-            self.url_db.update_url_status(url_obj.url_hash, 'failed', str(e))
-            return {'success': False, 'url': url, 'error': str(e)}
+            error_msg = str(e)
+            log.error(f"Error processing {url}: {error_msg}")
+
+            # For YouTube scrapers, check if error is temporary
+            is_temporary = False
+            if source_type in ['youtube_video', 'youtube_channel']:
+                from scrapers.youtube_scraper import YouTubeScraper
+                is_temporary = YouTubeScraper.is_temporary_error(error_msg)
+
+            self._handle_scrape_error(url_obj, error_msg, is_temporary)
+            return {'success': False, 'url': url, 'error': error_msg, 'will_retry': is_temporary and url_obj.retry_count < 3}
 
     async def process_batch(self, batch_size: int = None) -> Dict[str, Any]:
         """

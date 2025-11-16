@@ -34,10 +34,15 @@ class VectorStore:
             )
         )
 
-        # Get or create collection
+        # Get or create collection with cosine similarity
+        # Cosine similarity is better for normalized embeddings (range: -1 to 1, higher = more similar)
+        # L2 distance measures euclidean distance (range: 0 to infinity, lower = more similar)
         self.collection = self.client.get_or_create_collection(
             name=collection_name,
-            metadata={"description": "Technical knowledge base for RAG"}
+            metadata={
+                "description": "Technical knowledge base for RAG",
+                "hnsw:space": "cosine"  # Use cosine similarity instead of L2
+            }
         )
 
         log.info(f"ChromaDB initialized at {db_path} with collection '{collection_name}'")
@@ -86,7 +91,10 @@ class VectorStore:
                 # Recreate the collection (same as __init__)
                 self.collection = self.client.get_or_create_collection(
                     name=self.collection_name,
-                    metadata={"description": "Technical knowledge base for RAG"}
+                    metadata={
+                        "description": "Technical knowledge base for RAG",
+                        "hnsw:space": "cosine"
+                    }
                 )
                 log.info(f"Collection '{self.collection_name}' recreated successfully")
 
@@ -137,7 +145,10 @@ class VectorStore:
                 log.warning(f"Collection '{self.collection_name}' not found during search(), recreating...")
                 self.collection = self.client.get_or_create_collection(
                     name=self.collection_name,
-                    metadata={"description": "Technical knowledge base for RAG"}
+                    metadata={
+                        "description": "Technical knowledge base for RAG",
+                        "hnsw:space": "cosine"
+                    }
                 )
                 log.info(f"Collection '{self.collection_name}' recreated successfully")
                 # Return empty results
@@ -224,7 +235,10 @@ class VectorStore:
                 log.warning(f"Collection '{self.collection_name}' not found during count(), recreating...")
                 self.collection = self.client.get_or_create_collection(
                     name=self.collection_name,
-                    metadata={"description": "Technical knowledge base for RAG"}
+                    metadata={
+                        "description": "Technical knowledge base for RAG",
+                        "hnsw:space": "cosine"
+                    }
                 )
                 log.info(f"Collection '{self.collection_name}' recreated successfully")
                 return 0

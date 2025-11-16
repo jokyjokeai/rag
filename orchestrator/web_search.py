@@ -154,9 +154,15 @@ class BraveSearchClient:
             r'.*content.*on.*youtube', r'best.*youtube.*channel',
             r'learn.*online', r'tutorial.*list',
 
-            # Ads and promotional
+            # Paid courses and paywalls
             r'udemy\.com', r'coursera\.org', r'skillshare\.com',
             r'educative\.io', r'pluralsight\.com',
+            r'packtpub\.com', r'oreilly\.com', r'manning\.com',
+            r'apress\.com', r'wiley\.com', r'pearson\.com',
+            r'linkedin\.com/learning', r'datacamp\.com',
+            r'frontendmasters\.com', r'egghead\.io',
+            r'classcentral\.com', r'edx\.org',  # Course aggregators
+            r'subscription\.', r'premium\.', r'/pricing',  # Subscription indicators
 
             # Low-quality aggregators
             r'nbshare\.io', r'coursetakers\.com',

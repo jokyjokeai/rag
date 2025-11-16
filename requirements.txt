@@ -33,6 +33,7 @@ langchain-community
 tiktoken
 tree-sitter
 langdetect
+rank-bm25  # For BM25 keyword search in hybrid retrieval
 
 # Async & Queue
 aiohttp

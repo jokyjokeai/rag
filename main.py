@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from orchestrator import Orchestrator
 from queue_processor.integrated_processor import IntegratedProcessor
 from database import VectorStore
+from processing import Reranker, QueryExpander, KeywordSearcher, HybridSearcher
 from utils import log
 
 
@@ -23,6 +24,13 @@ class RAGSystem:
         self.orchestrator = Orchestrator()
         self.processor = IntegratedProcessor()
         self.vector_store = VectorStore()
+
+        # Lazy load advanced search components
+        self.reranker = None
+        self.query_expander = None
+        self.keyword_searcher = None
+        self.hybrid_searcher = None
+
         log.info("RAG System initialized")
 
     def add_sources(self, user_input: str, interactive: bool = False) -> dict:
@@ -96,6 +104,72 @@ class RAGSystem:
         # Check if we have YouTube channels (discovered or extracted)
         youtube_videos = urls_by_type.get('youtube_video', [])
         youtube_channels_found = urls_by_type.get('youtube_channel', [])
+
+        # Diversity filter for YouTube videos
+        if youtube_videos and len(youtube_videos) > 5:
+            print("💡 FILTRE DE DIVERSITÉ VIDÉOS YOUTUBE")
+            print("="*70 + "\n")
+            print(f"🎥 {len(youtube_videos)} vidéos YouTube trouvées")
+
+            # Extract unique channels from videos
+            from scrapers.youtube_channel_crawler import YouTubeChannelCrawler
+            temp_crawler = YouTubeChannelCrawler()
+            channels_in_videos = {}
+
+            for video_url in youtube_videos:
+                try:
+                    channel_url = temp_crawler._get_channel_url_from_video(video_url)
+                    if channel_url:
+                        if channel_url not in channels_in_videos:
+                            channels_in_videos[channel_url] = []
+                        channels_in_videos[channel_url].append(video_url)
+                except:
+                    pass
+
+            if len(channels_in_videos) > 1:
+                print(f"   Provenant de {len(channels_in_videos)} chaîne(s) différente(s)")
+                print()
+                print("Options de filtrage :")
+                print("   [K] Keep all     - Garder toutes les vidéos")
+                print("   [D] Diversity    - Max 3 vidéos par chaîne")
+                print("   [S] Single       - 1 vidéo par chaîne (diversité maximale)")
+                print()
+
+                filter_choice = input("Votre choix [K/D/S] : ").strip().upper()
+
+                if filter_choice == 'D':
+                    # Keep max 3 videos per channel
+                    filtered_videos = []
+                    for channel, videos in channels_in_videos.items():
+                        filtered_videos.extend(videos[:3])
+
+                    # Update the video list
+                    urls_by_type['youtube_video'] = filtered_videos
+                    youtube_videos = filtered_videos
+
+                    # Update all_urls
+                    all_urls = [url for url in all_urls if detect_url_type(url) != 'youtube_video']
+                    all_urls.extend(filtered_videos)
+
+                    print(f"   ✅ Réduit à {len(filtered_videos)} vidéos (max 3 par chaîne)\n")
+
+                elif filter_choice == 'S':
+                    # Keep only 1 video per channel
+                    filtered_videos = []
+                    for channel, videos in channels_in_videos.items():
+                        filtered_videos.append(videos[0])
+
+                    # Update the video list
+                    urls_by_type['youtube_video'] = filtered_videos
+                    youtube_videos = filtered_videos
+
+                    # Update all_urls
+                    all_urls = [url for url in all_urls if detect_url_type(url) != 'youtube_video']
+                    all_urls.extend(filtered_videos)
+
+                    print(f"   ✅ Réduit à {len(filtered_videos)} vidéos (1 par chaîne)\n")
+                else:
+                    print("   ✅ Toutes les vidéos conservées\n")
 
         all_channels = list(youtube_channels_found)  # Start with discovered channels
 
@@ -194,8 +268,100 @@ class RAGSystem:
 
             print("\n" + "="*70)
 
-        print(f"Total : {len(all_urls)} URLs trouvées\n")
+        # Competitor technologies interactive mode
+        if result.get('technologies'):
+            print("\n" + "="*70)
+            print("🔬 TECHNOLOGIES DÉTECTÉES")
+            print("="*70 + "\n")
+
+            technologies = result['technologies'][:5]  # Limit to top 5
+            print(f"Technologies principales identifiées :")
+            for i, tech in enumerate(technologies, 1):
+                print(f"   {i}. {tech}")
+            print()
+
+            # Ask if user wants to search for competitors
+            search_competitors = input("Rechercher de la documentation sur les concurrents/alternatives ? (o/n) : ").strip().lower()
+
+            if search_competitors in ['o', 'oui', 'y', 'yes']:
+                print("\n🔄 Génération des requêtes concurrentes...")
+
+                # Generate competitor queries
+                from orchestrator.query_analyzer import QueryAnalyzer
+                analyzer = QueryAnalyzer()
+                competitor_queries = analyzer._generate_competitor_queries(technologies)
+
+                if competitor_queries:
+                    print(f"   ✅ {len(competitor_queries)} requêtes concurrentes générées")
+                    print("\n💡 Exemples de concurrents recherchés :")
+                    for q in competitor_queries[:5]:  # Show first 5 examples
+                        print(f"   - {q}")
+                    print()
+
+                    # Ask for confirmation
+                    execute_search = input("Exécuter ces recherches avec Brave Search ? (o/n) : ").strip().lower()
+
+                    if execute_search in ['o', 'oui', 'y', 'yes']:
+                        print("   🔄 Recherche en cours...")
+
+                        # Execute competitor searches via Brave
+                        from orchestrator.brave_searcher import BraveSearcher
+                        brave = BraveSearcher()
+
+                        competitor_urls = set()
+                        for query in competitor_queries:
+                            try:
+                                search_result = brave.search(query, max_results=3)  # Limit to 3 per query
+                                for url in search_result.get('urls', []):
+                                    competitor_urls.add(url)
+                            except Exception as e:
+                                log.warning(f"Competitor search failed for '{query}': {e}")
+
+                        if competitor_urls:
+                            # Add discovered competitor URLs
+                            competitor_list = list(competitor_urls)
+                            all_urls.extend(competitor_list)
+
+                            print(f"\n   ✅ {len(competitor_list)} URLs concurrentes ajoutées!")
+                            print("   Types de contenu trouvé :")
+
+                            # Show distribution by type
+                            comp_types = defaultdict(int)
+                            for url in competitor_list:
+                                url_type = detect_url_type(url)
+                                comp_types[url_type] += 1
+
+                            for url_type, count in comp_types.items():
+                                icon = type_icons.get(url_type, '📄')
+                                print(f"      {icon} {url_type}: {count}")
+                            print()
+                        else:
+                            print("   ⚠️  Aucune URL concurrente trouvée\n")
+                    else:
+                        print("   ⏭️  Recherche de concurrents ignorée\n")
+                else:
+                    print("   ⚠️  Impossible de générer des requêtes concurrentes\n")
+            else:
+                print("   ⏭️  Recherche de concurrents ignorée\n")
+
+        # Final summary with detailed breakdown
         print("="*70)
+        print("📊 RÉCAPITULATIF FINAL")
+        print("="*70 + "\n")
+
+        # Count by type
+        final_summary = defaultdict(int)
+        for url in all_urls:
+            url_type = detect_url_type(url)
+            final_summary[url_type] += 1
+
+        print("URLs par type :")
+        for source_type, count in sorted(final_summary.items()):
+            icon = type_icons.get(source_type, '📄')
+            print(f"   {icon} {source_type:20s}: {count:4d}")
+
+        print(f"\n   📦 TOTAL : {len(all_urls)} URLs")
+        print()
 
         # Ask for selection
         print("\n💡 OPTIONS DE SÉLECTION :")
@@ -287,67 +453,245 @@ class RAGSystem:
         """
         return await self.processor.process_all(max_batches=max_batches)
 
-    def search(self, query: str, n_results: int = 5, filters: dict = None, similarity_threshold: float = 1.5):
+    def search(
+        self,
+        query: str,
+        n_results: int = 5,
+        filters: dict = None,
+        similarity_threshold: float = 1.5,
+        enable_reranking: bool = True,
+        enable_hybrid: bool = False,
+        enable_query_expansion: bool = False
+    ):
         """
-        Search the knowledge base with similarity threshold filtering.
+        Advanced search with multiple retrieval strategies.
+
+        Features:
+        - Semantic search (embeddings)
+        - Keyword search (BM25)
+        - Hybrid fusion (RRF)
+        - Cross-encoder reranking
+        - LLM query expansion
 
         Args:
             query: Search query
-            n_results: Number of results
+            n_results: Number of results to return
             filters: Optional metadata filters
-            similarity_threshold: Maximum L2 distance threshold. Results above this are filtered out.
-                                 ChromaDB uses L2 distance (lower = more similar).
-                                 Typical threshold: 1.0-2.0 (lower = stricter, fewer results)
+            similarity_threshold: Maximum cosine distance threshold (0-2 range)
+            enable_reranking: Use cross-encoder reranking (default: True, +15-25% accuracy)
+            enable_hybrid: Use hybrid semantic+keyword search (default: False, +10-20% recall)
+            enable_query_expansion: Use LLM to expand query (default: False, +5-15% for short queries)
 
         Returns:
-            Search results with filtered results based on similarity threshold
+            Search results with similarity/rerank scores
         """
+        from processing import Embedder
+
+        # Stage 0: Query expansion (optional)
+        search_query = query
+        if enable_query_expansion:
+            if self.query_expander is None:
+                self.query_expander = QueryExpander()
+            search_query = self.query_expander.expand(query)
+            if search_query != query:
+                log.info(f"Query expanded: '{query}' -> '{search_query}'")
+
+        # Stage 1: Retrieval (semantic and/or keyword)
+        if enable_hybrid:
+            # Hybrid: semantic + keyword search
+            return self._hybrid_search(
+                search_query,
+                n_results,
+                filters,
+                enable_reranking,
+                similarity_threshold
+            )
+        else:
+            # Semantic-only search
+            return self._semantic_search(
+                search_query,
+                n_results,
+                filters,
+                enable_reranking,
+                similarity_threshold
+            )
+
+    def _semantic_search(
+        self,
+        query: str,
+        n_results: int,
+        filters: dict,
+        enable_reranking: bool,
+        similarity_threshold: float
+    ):
+        """Semantic search using embeddings."""
         from processing import Embedder
 
         # Generate query embedding
         embedder = Embedder()
         query_embedding = embedder.embed_single(query)
 
-        # Search vector store (get more results to account for filtering)
+        # Determine initial retrieval size
+        initial_k = (n_results * 4) if enable_reranking else (n_results * 2)
+
+        # Vector similarity search
         raw_results = self.vector_store.search(
             query_embedding=query_embedding,
-            n_results=n_results * 2,  # Get 2x results before filtering
+            n_results=initial_k,
             where=filters
         )
 
-        # Filter results by similarity threshold
-        # ChromaDB returns distances (lower = more similar)
-        # Convert to similarity scores (higher = more similar) for easier understanding
-        filtered_documents = []
-        filtered_metadatas = []
-        filtered_distances = []
-        filtered_similarities = []
+        # Extract results
+        documents = raw_results.get('documents', [[]])[0]
+        metadatas = raw_results.get('metadatas', [[]])[0]
+        distances = raw_results.get('distances', [[]])[0]
 
-        if raw_results.get('distances') and raw_results['distances'][0]:
-            for i, distance in enumerate(raw_results['distances'][0]):
-                # Convert L2 distance to similarity score (0-1 range, higher = more similar)
-                # Formula: similarity = 1 / (1 + distance)
-                similarity = 1 / (1 + distance)
+        if not documents:
+            return self._empty_results()
 
-                # Filter by threshold
-                if distance <= similarity_threshold:
-                    filtered_documents.append(raw_results['documents'][0][i])
-                    filtered_metadatas.append(raw_results['metadatas'][0][i])
-                    filtered_distances.append(distance)
-                    filtered_similarities.append(similarity)
+        # Reranking
+        if enable_reranking:
+            return self._apply_reranking(query, documents, metadatas, n_results)
+        else:
+            return self._filter_by_threshold(documents, metadatas, distances, n_results, similarity_threshold)
 
-        # Limit to requested number of results
-        filtered_documents = filtered_documents[:n_results]
-        filtered_metadatas = filtered_metadatas[:n_results]
-        filtered_distances = filtered_distances[:n_results]
-        filtered_similarities = filtered_similarities[:n_results]
+    def _hybrid_search(
+        self,
+        query: str,
+        n_results: int,
+        filters: dict,
+        enable_reranking: bool,
+        similarity_threshold: float
+    ):
+        """Hybrid search combining semantic and keyword retrieval."""
+        from processing import Embedder
+
+        # Build keyword index if not exists
+        if self.keyword_searcher is None:
+            self.keyword_searcher = KeywordSearcher()
+            # Index all documents from vector store
+            # Note: This is expensive, ideally done offline
+            log.info("Building keyword search index from vector store...")
+            all_docs, all_metas = self._get_all_documents()
+            if all_docs:
+                self.keyword_searcher.index(all_docs, all_metas)
+
+        # Lazy load hybrid searcher
+        if self.hybrid_searcher is None:
+            self.hybrid_searcher = HybridSearcher()
+
+        # Get semantic results
+        embedder = Embedder()
+        query_embedding = embedder.embed_single(query)
+        semantic_results = self.vector_store.search(
+            query_embedding=query_embedding,
+            n_results=n_results * 3,  # Get more for fusion
+            where=filters
+        )
+
+        semantic_docs = semantic_results.get('documents', [[]])[0]
+        semantic_metas = semantic_results.get('metadatas', [[]])[0]
+        semantic_dists = semantic_results.get('distances', [[]])[0]
+
+        # Convert distances to scores (higher = better)
+        semantic_scores = [1 - (d / 2) for d in semantic_dists]
+
+        # Get keyword results
+        keyword_docs, keyword_metas, keyword_scores = self.keyword_searcher.search(
+            query, top_k=n_results * 3
+        )
+
+        # Fuse results
+        fused_docs, fused_metas, fused_scores = self.hybrid_searcher.fuse_results(
+            semantic_docs, semantic_metas, semantic_scores,
+            keyword_docs, keyword_metas, keyword_scores,
+            top_k=n_results * 2 if enable_reranking else n_results
+        )
+
+        if not fused_docs:
+            return self._empty_results()
+
+        # Reranking on fused results
+        if enable_reranking:
+            return self._apply_reranking(query, fused_docs, fused_metas, n_results)
+        else:
+            # Return fused results
+            return {
+                'documents': [fused_docs],
+                'metadatas': [fused_metas],
+                'distances': [[0.0] * len(fused_docs)],
+                'similarities': [fused_scores],
+                'rerank_scores': [[]]
+            }
+
+    def _apply_reranking(self, query: str, documents: list, metadatas: list, n_results: int):
+        """Apply cross-encoder reranking."""
+        if self.reranker is None:
+            self.reranker = Reranker()
+
+        reranked_docs, reranked_metas, rerank_scores = self.reranker.rerank(
+            query=query,
+            documents=documents,
+            metadatas=metadatas,
+            top_k=n_results
+        )
+
+        rerank_similarities = self.reranker.normalize_scores(rerank_scores)
 
         return {
-            'documents': [filtered_documents],
-            'metadatas': [filtered_metadatas],
-            'distances': [filtered_distances],
-            'similarities': [filtered_similarities]  # Added for easier display
+            'documents': [reranked_docs],
+            'metadatas': [reranked_metas],
+            'distances': [[0.0] * len(reranked_docs)],
+            'similarities': [rerank_similarities],
+            'rerank_scores': [rerank_scores]
         }
+
+    def _filter_by_threshold(self, documents: list, metadatas: list, distances: list, n_results: int, threshold: float):
+        """Filter results by similarity threshold."""
+        filtered_docs = []
+        filtered_metas = []
+        filtered_dists = []
+        filtered_sims = []
+
+        for i, distance in enumerate(distances):
+            similarity = 1 - (distance / 2)  # Cosine similarity
+
+            if distance <= threshold:
+                filtered_docs.append(documents[i])
+                filtered_metas.append(metadatas[i])
+                filtered_dists.append(distance)
+                filtered_sims.append(similarity)
+
+        # Limit to n_results
+        return {
+            'documents': [filtered_docs[:n_results]],
+            'metadatas': [filtered_metas[:n_results]],
+            'distances': [filtered_dists[:n_results]],
+            'similarities': [filtered_sims[:n_results]],
+            'rerank_scores': [[]]
+        }
+
+    def _empty_results(self):
+        """Return empty search results."""
+        return {
+            'documents': [[]],
+            'metadatas': [[]],
+            'distances': [[]],
+            'similarities': [[]],
+            'rerank_scores': [[]]
+        }
+
+    def _get_all_documents(self):
+        """Get all documents from vector store for keyword indexing."""
+        try:
+            # Get a large number of results (or all)
+            all_data = self.vector_store.collection.get()
+            documents = all_data.get('documents', [])
+            metadatas = all_data.get('metadatas', [])
+            return documents, metadatas
+        except Exception as e:
+            log.error(f"Error getting all documents: {e}")
+            return [], []
 
     def get_stats(self) -> dict:
         """Get system statistics."""

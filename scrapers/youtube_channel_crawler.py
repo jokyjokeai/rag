@@ -160,7 +160,7 @@ class YouTubeChannelCrawler:
             return None
 
         try:
-            # Search for channel
+            # Search for channel by name
             request = self.youtube.search().list(
                 part='snippet',
                 q=handle,

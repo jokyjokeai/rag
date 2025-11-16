@@ -169,8 +169,8 @@ class Orchestrator:
                     'urls': []
                 }
 
-            # Use Ollama to generate search strategy
-            strategy = self.query_analyzer.analyze_prompt(analysis['text'])
+            # Use Ollama to generate search strategy (interactive mode)
+            strategy = self.query_analyzer.analyze_prompt(analysis['text'], interactive=True)
 
             # Execute web searches
             search_results = self.search_client.multi_search(
@@ -182,11 +182,17 @@ class Orchestrator:
             discovered_urls = self.search_client.extract_urls(search_results)
             log.info(f"Discovered {len(discovered_urls)} URLs from web search")
 
-        return {
+        result = {
             'success': True,
             'input_type': analysis['type'],
             'urls': discovered_urls
         }
+
+        # Add technologies if available (from prompt analysis)
+        if analysis['type'] == 'prompt' and 'strategy' in locals():
+            result['technologies'] = strategy.get('technologies', [])
+
+        return result
 
     def _get_refresh_frequency(self, source_type: str) -> str:
         """

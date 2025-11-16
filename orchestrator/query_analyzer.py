@@ -31,6 +31,7 @@ class QueryAnalyzer:
     def _extract_technologies(self, text: str) -> List[str]:
         """
         Extract technical components from a long text using simple pattern matching.
+        More robust to typos and missing spaces.
 
         Args:
             text: Input text (possibly very long specification)
@@ -40,32 +41,58 @@ class QueryAnalyzer:
         """
         import re
 
-        # Common technical terms to detect
-        tech_patterns = [
+        # Technology patterns with their canonical names
+        # Using more flexible patterns to catch typos and missing spaces
+        tech_patterns = {
             # Web frameworks
-            r'\bFastAPI\b', r'\bDjango\b', r'\bFlask\b', r'\bVue\.?js\b', r'\bReact\b', r'\bAngular\b',
+            'FastAPI': [r'fastapi', r'fast\s*api'],
+            'Django': [r'django'],
+            'Flask': [r'flask'],
+            'Vue.js': [r'vue\.?js', r'vuejs'],
+            'React': [r'react\.?js', r'reactjs'],
+            'Angular': [r'angular'],
             # Databases
-            r'\bChromaDB\b', r'\bQdrant\b', r'\bPinecone\b', r'\bPostgreSQL\b', r'\bRedis\b',
-            r'\bMongoDB\b', r'\bMySQL\b',
+            'ChromaDB': [r'chroma\s*db', r'chromadb'],
+            'Qdrant': [r'qdrant'],
+            'Pinecone': [r'pinecone'],
+            'PostgreSQL': [r'postgres(?:ql)?'],
+            'Redis': [r'redis'],
+            'MongoDB': [r'mongo(?:db)?'],
+            'MySQL': [r'mysql'],
             # AI/ML
-            r'\bWhisper\b', r'\bOllama\b', r'\bLlama\b', r'\bGPT\b', r'\bTTS\b',
-            r'\bCoqui\b', r'\bElevenLabs\b', r'\bsentence-transformers?\b',
+            'Whisper': [r'whisper'],
+            'Ollama': [r'ollama'],
+            'Llama': [r'llama'],
+            'GPT': [r'gpt[-\s]?\d*'],
+            'TTS': [r'tts', r'text\s*to\s*speech'],
+            'Coqui': [r'coqui'],
+            'ElevenLabs': [r'eleven\s*labs'],
+            'SentenceTransformers': [r'sentence[\s-]?transformers?'],
             # Telephony/Audio
-            r'\bFreeSWITCH\b', r'\bAsterisk\b', r'\bWebRTC\b', r'\bSIP\b', r'\bVoIP\b',
+            'FreeSWITCH': [r'free\s*switch', r'freeswitch'],
+            'Asterisk': [r'asterisk'],
+            'WebRTC': [r'web\s*rtc', r'webrtc'],
+            'SIP': [r'\bsip\b'],
+            'VoIP': [r'vo\s*ip', r'voip'],
             # Other
-            r'\bDocker\b', r'\bKubernetes\b', r'\bRabbitMQ\b', r'\bWebSocket\b',
-            r'\bNginx\b', r'\bApache\b',
-        ]
+            'Docker': [r'docker'],
+            'Kubernetes': [r'kubernetes', r'k8s'],
+            'RabbitMQ': [r'rabbit\s*mq', r'rabbitmq'],
+            'WebSocket': [r'web\s*socket', r'websocket'],
+            'Nginx': [r'nginx'],
+            'Apache': [r'apache'],
+        }
 
         detected = []
         text_lower = text.lower()
 
-        for pattern in tech_patterns:
-            matches = re.finditer(pattern, text, re.IGNORECASE)
-            for match in matches:
-                tech = match.group(0)
-                if tech not in detected and tech.lower() not in [d.lower() for d in detected]:
-                    detected.append(tech)
+        # Try all patterns for each technology
+        for tech_name, patterns in tech_patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, text_lower):
+                    if tech_name not in detected:
+                        detected.append(tech_name)
+                    break  # Found this tech, move to next
 
         # Also extract words in ALL CAPS or CamelCase (likely tech names)
         camel_case = re.findall(r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b', text)
@@ -148,18 +175,20 @@ Example:
         log.info(f"Generated {len(competitor_queries)} competitor queries")
         return competitor_queries
 
-    def analyze_prompt(self, prompt: str) -> Dict[str, Any]:
+    def analyze_prompt(self, prompt: str, interactive: bool = False) -> Dict[str, Any]:
         """
         Analyze a text prompt and generate a search strategy.
 
         Args:
             prompt: User's text prompt
+            interactive: If True, don't auto-add competitor queries (let UI handle it)
 
         Returns:
             Dictionary with:
                 - search_queries: List of search queries to execute
                 - topics: Main topics identified
                 - keywords: Important keywords
+                - technologies: Detected technologies
         """
         # For very long prompts, extract technologies first
         technologies = []
@@ -189,79 +218,86 @@ Example:
         log.info(f"Detected {num_techs} technologies: {', '.join(technologies[:5])}{'...' if len(technologies) > 5 else ''}")
         log.info(f"Recommending {recommended_queries} search queries")
 
-        system_prompt = """You are a search strategy generator for a RAG system.
+        # Generate dynamic examples based on detected technologies
+        example_techs = technologies[:3] if len(technologies) >= 3 else ['TechnologyA', 'TechnologyB', 'TechnologyC']
+        tech_examples = ', '.join(example_techs)
+
+        system_prompt = f"""You are a search strategy generator for a RAG system.
 Your task is to analyze user queries and generate effective web search queries to find relevant resources.
 
 CRITICAL: You MUST extract ALL technical components, frameworks, and technologies mentioned in the user's query.
 For EACH component found, generate AT LEAST ONE search query.
 
 IMPORTANT: Generate a MIX of different query types with STRICT ratios:
-- 20% Documentation/official sites (e.g., "FreeSWITCH official documentation", "Whisper API docs")
+- 20% Documentation/official sites (e.g., "TechName official documentation", "TechName API docs")
 - 70% YouTube content (videos/channels/masterclass/playlists) - MANDATORY MINIMUM
-  * 30% YouTube CHANNELS (e.g., "@FastAPI channel tutorials", "Whisper YouTube channel")
-  * 20% MASTERCLASS/Long videos (e.g., "FastAPI masterclass YouTube", "Whisper complete course 1 hour")
-  * 10% PLAYLISTS (e.g., "FastAPI playlist series", "Whisper tutorial playlist")
-  * 10% Regular videos (e.g., "FastAPI quick tutorial video")
-- 10% GitHub repositories (e.g., "faster-whisper GitHub", "FreeSWITCH examples GitHub")
+  * 30% YouTube CHANNELS (e.g., "@TechName channel tutorials", "TechName YouTube channel")
+  * 20% MASTERCLASS/Long videos (e.g., "TechName masterclass YouTube", "TechName complete course 1 hour")
+  * 10% PLAYLISTS (e.g., "TechName playlist series", "TechName tutorial playlist")
+  * 10% Regular videos (e.g., "TechName quick tutorial video")
+- 10% GitHub repositories (e.g., "TechName GitHub", "TechName examples GitHub")
 
 🎥 YOUTUBE IS MANDATORY (70% MINIMUM):
 - You MUST include YouTube-related keywords in at least 70% of queries
 - PRIORITIZE: Channels > Masterclass > Playlists > Individual videos
-- Channel queries: "{tech} YouTube channel tutorials", "@{tech} channel", "{tech} channel complete guide"
-- Masterclass queries: "{tech} masterclass YouTube", "{tech} complete course 1 hour+", "{tech} full tutorial"
-- Playlist queries: "{tech} playlist series", "{tech} tutorial playlist YouTube"
+- Channel queries: "TechName YouTube channel tutorials", "@TechName channel", "TechName channel complete guide"
+- Masterclass queries: "TechName masterclass YouTube", "TechName complete course 1 hour+", "TechName full tutorial"
+- Playlist queries: "TechName playlist series", "TechName tutorial playlist YouTube"
 - For every technology, create at least 1 CHANNEL query and 1 MASTERCLASS query
 
 MANDATORY RULES:
 1. Extract ALL technologies mentioned (libraries, frameworks, tools, databases)
 2. For EACH technology, create at least 3 specific search queries:
-   - 1 CHANNEL query (e.g., "{tech} YouTube channel")
-   - 1 MASTERCLASS query (e.g., "{tech} masterclass complete course")
+   - 1 CHANNEL query (e.g., "TechName YouTube channel")
+   - 1 MASTERCLASS query (e.g., "TechName masterclass complete course")
    - 1 DOCS/GitHub query
 3. Prioritize YouTube content (70%), especially channels and masterclass
 4. Generate diverse search queries to cover all components
 5. Include technical keywords in queries (e.g., "streaming", "real-time", "API", "tutorial")
 
-Example: If user mentions "FreeSWITCH, Whisper, FastAPI, ChromaDB, Redis":
-MUST generate at least 15 queries with 10+ YouTube (70%):
-- "FreeSWITCH YouTube channel tutorials" (channel) ✅
-- "FreeSWITCH masterclass complete course 1 hour" (masterclass) ✅
-- "FreeSWITCH official documentation" (docs)
-- "Whisper YouTube channel Python streaming" (channel) ✅
-- "Whisper masterclass full tutorial" (masterclass) ✅
-- "faster-whisper GitHub repository" (GitHub)
-- "FastAPI YouTube channel WebSocket tutorials" (channel) ✅
-- "FastAPI masterclass complete guide" (masterclass) ✅
-- "FastAPI playlist series YouTube" (playlist) ✅
-- "ChromaDB YouTube channel vector database" (channel) ✅
-- "ChromaDB complete course" (masterclass) ✅
-- "Redis YouTube channel async tutorials" (channel) ✅
-- "Redis masterclass YouTube" (masterclass) ✅
-- "Coqui TTS YouTube channel" (channel) ✅
-- etc.
+Example: If user mentions "{tech_examples}":
+You MUST generate queries ONLY for these {len(example_techs)} technologies.
+DO NOT add queries for technologies NOT mentioned in the user's request.
+
+Sample queries for the FIRST technology ({example_techs[0]}):
+- "{example_techs[0]} YouTube channel tutorials" (channel) ✅
+- "{example_techs[0]} masterclass complete course" (masterclass) ✅
+- "{example_techs[0]} official documentation" (docs)
+- "{example_techs[0]} GitHub repository" (GitHub)
+
+Then repeat for each detected technology. DO NOT invent extra technologies.
 
 Return ONLY a valid JSON object with this structure:
-{
+{{
     "search_queries": ["query 1", "query 2", "query 3", ..., "query N"],
     "topics": ["topic1", "topic2", "topic3"],
     "keywords": ["keyword1", "keyword2", "keyword3", "keyword4", "keyword5"]
-}
+}}
 
 Do not include any markdown formatting, code blocks, or additional text. Return only the raw JSON object."""
+
+        # Build dynamic example based on detected technologies
+        if len(technologies) > 0:
+            tech_example_text = f"""- Example based on YOUR analysis: If you detect "{tech_examples}":
+  * {example_techs[0]}: "{example_techs[0]} official docs", "{example_techs[0]} tutorial YouTube complete" ✅"""
+            if len(example_techs) > 1:
+                tech_example_text += f"""
+  * {example_techs[1]}: "{example_techs[1]} YouTube channel" ✅, "{example_techs[1]} GitHub" """
+        else:
+            tech_example_text = "- For EACH technology detected, create queries following the patterns above"
 
         user_prompt = f"""User request: "{condensed_prompt}"
 
 TASK: Extract ALL technical components, frameworks, libraries, databases, and tools mentioned above.
 Then generate {recommended_queries} diverse search queries covering EVERY component.
 
+⚠️ CRITICAL: Generate queries ONLY for technologies mentioned in the user's request above.
+DO NOT add queries for unrelated technologies like FastAPI, Whisper, ChromaDB unless they appear in the request.
+
 CRITICAL STRATEGY:
-- Think PER TECHNICAL COMPONENT, not globally
-- For EACH technology/framework/tool, create at least 2 queries (one MUST be YouTube)
-- Example: If you detect "FreeSWITCH, Whisper, FastAPI, ChromaDB":
-  * FreeSWITCH: "FreeSWITCH official docs", "FreeSWITCH tutorial YouTube complete" ✅
-  * Whisper: "Whisper streaming video tutorial" ✅, "faster-whisper GitHub"
-  * FastAPI: "FastAPI WebSocket YouTube guide" ✅, "FastAPI async docs"
-  * ChromaDB: "ChromaDB vector database YouTube" ✅
+- Think PER TECHNICAL COMPONENT found in the user's request
+- For EACH technology/framework/tool detected, create at least 2 queries (one MUST be YouTube)
+{tech_example_text}
 
 MANDATORY requirements (STRICT RATIO):
 1. Create at least 3 queries for EACH technology mentioned:
@@ -306,13 +342,18 @@ Generate exactly {recommended_queries} queries now."""
 
             strategy = json.loads(response_text)
 
-            # Add competitor queries (if enabled)
-            if settings.enable_competitor_queries:
+            # Add detected technologies to strategy
+            strategy['technologies'] = technologies
+
+            # Add competitor queries (if enabled and not interactive)
+            if settings.enable_competitor_queries and not interactive:
                 competitor_queries = self._generate_competitor_queries(technologies)
                 if competitor_queries:
                     strategy['search_queries'].extend(competitor_queries)
                     log.info(f"Added {len(competitor_queries)} competitor queries")
                 log.info(f"Generated {len(strategy.get('search_queries', []))} total search queries (including competitors)")
+            elif interactive:
+                log.info(f"Interactive mode: Generated {len(strategy.get('search_queries', []))} search queries (competitors will be prompted)")
             else:
                 log.info(f"Competitor queries disabled. Generated {len(strategy.get('search_queries', []))} search queries")
             return strategy
@@ -352,7 +393,8 @@ Generate exactly {recommended_queries} queries now."""
         return {
             'search_queries': search_queries,
             'topics': keywords[:3],
-            'keywords': keywords
+            'keywords': keywords,
+            'technologies': []  # Empty in fallback mode
         }
 
     def should_search_web(self, prompt: str) -> bool:
