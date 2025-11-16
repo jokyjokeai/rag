@@ -183,24 +183,35 @@ class VectorStore:
         Returns:
             Dictionary with statistics
         """
-        total_count = self.count()
+        try:
+            total_count = self.count()
 
-        # Get unique source types
-        all_data = self.collection.get()
-        source_types = {}
+            # Get unique source types
+            all_data = self.collection.get()
+            source_types = {}
 
-        if all_data['metadatas']:
-            for metadata in all_data['metadatas']:
-                source_type = metadata.get('source_type', 'unknown')
-                source_types[source_type] = source_types.get(source_type, 0) + 1
+            if all_data['metadatas']:
+                for metadata in all_data['metadatas']:
+                    source_type = metadata.get('source_type', 'unknown')
+                    source_types[source_type] = source_types.get(source_type, 0) + 1
 
-        stats = {
-            'total_chunks': total_count,
-            'by_source_type': source_types,
-            'collection_name': self.collection_name
-        }
+            stats = {
+                'total_chunks': total_count,
+                'by_source_type': source_types,
+                'collection_name': self.collection_name
+            }
 
-        return stats
+            return stats
+
+        except Exception as e:
+            # Collection might not exist (e.g., after reset from another instance)
+            # Return empty stats gracefully instead of crashing
+            log.warning(f"Error getting stats (collection may not exist): {e}")
+            return {
+                'total_chunks': 0,
+                'by_source_type': {},
+                'collection_name': self.collection_name
+            }
 
     def reset(self):
         """

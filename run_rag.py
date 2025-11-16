@@ -217,8 +217,18 @@ async def main():
                     for source_type, count in db_stats['by_type'].items():
                         print(f"   {source_type:20s}: {count:4d}")
 
+                # Info message if database is empty
+                if db_stats['total'] == 0 and vs_stats['total_chunks'] == 0:
+                    print("\nℹ️  La base de données est vide")
+                    print("   Utilisez l'option 1 ou 2 pour ajouter des sources\n")
+
             except Exception as e:
-                print(f"\n❌ Erreur : {e}")
+                print(f"\n❌ Erreur lors de la récupération des statistiques")
+                if "does not exist" in str(e).lower():
+                    print("ℹ️  La base de données est vide ou vient d'être réinitialisée")
+                    print("   Ajoutez des sources pour voir des statistiques\n")
+                else:
+                    print(f"   Détails : {e}\n")
 
         elif choice == "6":
             # Brave Search quota
