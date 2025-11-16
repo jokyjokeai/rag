@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "rag-knowledge-base": {
+      "type": "stdio",
+      "command": "/home/jokyjokeai/Desktop/RAG/rag-local-system/venv/bin/python",
+      "args": [
+        "/home/jokyjokeai/Desktop/RAG/rag-local-system/mcp_server/server.py"
+      ],
+      "env": {
+        "PYTHONPATH": "/home/jokyjokeai/Desktop/RAG/rag-local-system"
+      }
+    }
+  }
+}

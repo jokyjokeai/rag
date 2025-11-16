@@ -41,8 +41,8 @@ async def list_tools() -> list[types.Tool]:
                     },
                     "n_results": {
                         "type": "integer",
-                        "description": "Number of results to return (default: 5)",
-                        "default": 5
+                        "description": "Number of chunks to return. Recommended: 10-20 for comprehensive context, 5 for quick answers. Default: 20",
+                        "default": 20
                     },
                     "source_type": {
                         "type": "string",
@@ -96,7 +96,7 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
     if name == "search_rag":
         query = arguments["query"]
-        n_results = arguments.get("n_results", 5)
+        n_results = arguments.get("n_results", 20)
         source_type = arguments.get("source_type", "all")
         difficulty = arguments.get("difficulty", "all")
 
@@ -137,12 +137,22 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             results.get('distances', [[0]*len(results['documents'][0])])[0]
         )):
             score = 1 - distance if distance else 1.0
+
+            # Handle topics (stored as comma-separated string in ChromaDB)
+            topics = meta.get('topics', '')
+            if isinstance(topics, str):
+                topics_str = topics if topics else 'N/A'
+            elif isinstance(topics, list):
+                topics_str = ', '.join(topics) if topics else 'N/A'
+            else:
+                topics_str = 'N/A'
+
             formatted_results.append(f"""
 ### Result {i+1} (Score: {score:.2f})
 
 **Source:** {meta.get('source_url', 'N/A')}
 **Type:** {meta.get('source_type', 'N/A')} | **Difficulty:** {meta.get('difficulty', 'N/A')}
-**Topics:** {', '.join(meta.get('topics', []))}
+**Topics:** {topics_str}
 
 {doc}
 
