@@ -208,10 +208,13 @@ class ResetManager:
                 else:
                     raise
 
-            # Vacuum to reclaim space
+            # Commit DELETE transactions before VACUUM
+            # CRITICAL: VACUUM must run outside of any transaction
+            conn.commit()
+
+            # Vacuum to reclaim space (runs in isolation)
             cursor.execute("VACUUM")
 
-            conn.commit()
             conn.close()
 
             log.info("SQLite reset completed successfully")
