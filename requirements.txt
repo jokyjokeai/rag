@@ -1,0 +1,54 @@
+# Core dependencies
+python-dotenv
+pydantic>=2.0
+pydantic-settings
+
+# LLM & Embeddings
+ollama
+sentence-transformers
+
+# Vector Database
+chromadb
+
+# Web Search
+requests
+
+# YouTube
+youtube-transcript-api
+google-api-python-client
+
+# GitHub (using git clone - no API needed)
+# Git must be installed on system
+
+# Web Scraping
+playwright
+beautifulsoup4
+lxml
+trafilatura
+markdownify
+
+# Text Processing
+langchain
+langchain-community
+tiktoken
+tree-sitter
+langdetect
+
+# Async & Queue
+aiohttp
+aiolimiter
+apscheduler
+
+# MCP
+mcp
+
+# Logging & Monitoring
+loguru
+rich
+
+# Utils
+python-dateutil
+tenacity
+
+# CLI
+click

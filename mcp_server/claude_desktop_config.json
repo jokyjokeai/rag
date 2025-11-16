@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "rag-knowledge-base": {
+      "command": "python",
+      "args": ["/home/jokyjokeai/Desktop/RAG/rag-local-system/mcp_server/server.py"],
+      "env": {}
+    }
+  }
+}
