@@ -198,10 +198,9 @@ class IntegratedProcessor:
         Returns:
             Processing result dictionary
         """
-        log.info(f"Crawling website: {website_url}")
-
         try:
             # Crawl website to discover pages
+            log.info(f"🔗 Starting website crawl (max: 1000 pages)...")
             crawl_result = await self.web_crawler.crawl_website(
                 website_url,
                 max_pages=1000  # Limit to 1000 pages per website
@@ -214,16 +213,18 @@ class IntegratedProcessor:
 
             discovered_pages = crawl_result['discovered_urls']
 
-            log.info(f"Discovered {len(discovered_pages)} pages from website: {crawl_result.get('base_domain', 'Unknown')}")
-
             # Add discovered pages to database
+            log.info(f"💾 Adding {len(discovered_pages)} discovered pages to database...")
             added_count = 0
-            for page_url in discovered_pages:
+            duplicate_count = 0
+
+            for i, page_url in enumerate(discovered_pages, 1):
                 normalized_url = normalize_url(page_url)
                 url_hash = compute_url_hash(normalized_url)
 
                 # Check if already exists
                 if self.url_db.url_exists(url_hash):
+                    duplicate_count += 1
                     continue
 
                 # Insert page URL
@@ -240,10 +241,15 @@ class IntegratedProcessor:
                 self.url_db.insert_url(url_obj_new)
                 added_count += 1
 
+                # Progress update every 25 pages
+                if i % 25 == 0:
+                    log.info(f"   [{i}/{len(discovered_pages)}] Added {added_count} new, skipped {duplicate_count} duplicates")
+
             # Mark website as processed
             self.url_db.update_url_status(url_obj.url_hash, 'scraped')
 
-            log.info(f"✅ Website crawled: added {added_count} pages to queue")
+            log.info(f"✅ Website crawled successfully!")
+            log.info(f"   Total discovered: {len(discovered_pages)} | Added: {added_count} | Duplicates: {duplicate_count}")
 
             return {
                 'success': True,

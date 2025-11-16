@@ -34,7 +34,9 @@ class WebCrawler:
         Returns:
             Dictionary with discovered URLs
         """
-        log.info(f"Crawling website: {start_url}")
+        from datetime import datetime
+
+        log.info(f"🕷️  Crawling website: {start_url} (max: {max_pages} pages)")
 
         # Parse base URL
         parsed_start = urlparse(start_url)
@@ -44,6 +46,10 @@ class WebCrawler:
         discovered_urls = []
         self.visited = set()
         self.to_visit = {normalize_url(start_url)}
+
+        # Time tracking for ETA
+        start_time = datetime.now()
+        error_count = 0
 
         try:
             async with async_playwright() as p:
@@ -126,15 +132,37 @@ class WebCrawler:
                             # Add to queue
                             self.to_visit.add(normalized)
 
-                        log.debug(f"Crawled {current_url}: found {len(links)} links, {len(self.to_visit)} in queue")
+                        # Progress feedback with visual indicators
+                        current_count = len(discovered_urls)
+                        log.info(f"📄 [{current_count}/{max_pages}] {current_url[:70]}...")
+                        log.info(f"   → {len(links)} links found | Queue: {len(self.to_visit)} | Visited: {len(self.visited)}")
+
+                        # Periodic summary every 10 pages
+                        if current_count % 10 == 0 and current_count > 0:
+                            elapsed = (datetime.now() - start_time).total_seconds()
+                            avg_time_per_page = elapsed / current_count
+                            remaining_pages = max_pages - current_count
+                            eta_seconds = avg_time_per_page * remaining_pages
+                            eta_minutes = int(eta_seconds / 60)
+
+                            log.info(f"🔄 Progress: {current_count}/{max_pages} pages | Queue: {len(self.to_visit)} | "
+                                   f"Elapsed: {int(elapsed)}s | ETA: ~{eta_minutes}min")
 
                     except Exception as e:
-                        log.warning(f"Error crawling {current_url}: {e}")
+                        error_count += 1
+                        log.warning(f"⚠️  Error crawling {current_url}: {e}")
                         continue
 
                 await browser.close()
 
-            log.info(f"Crawling complete: discovered {len(discovered_urls)} pages from {start_url}")
+            # Final summary
+            total_time = (datetime.now() - start_time).total_seconds()
+            minutes = int(total_time / 60)
+            seconds = int(total_time % 60)
+
+            log.info(f"✅ Crawling complete: discovered {len(discovered_urls)} pages in {minutes}m {seconds}s")
+            if error_count > 0:
+                log.info(f"   ⚠️  Encountered {error_count} errors during crawling")
 
             return {
                 'success': True,
