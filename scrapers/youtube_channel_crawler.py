@@ -160,7 +160,22 @@ class YouTubeChannelCrawler:
             return None
 
         try:
-            # Search for channel by name
+            # Method 1: Try forUsername (works for /c/ custom URLs)
+            try:
+                request = self.youtube.channels().list(
+                    part='id',
+                    forUsername=handle
+                )
+                response = request.execute()
+
+                if response.get('items'):
+                    channel_id = response['items'][0]['id']
+                    log.info(f"Resolved '{handle}' to channel ID: {channel_id} (via forUsername)")
+                    return channel_id
+            except Exception as e:
+                log.debug(f"forUsername failed for {handle}: {e}")
+
+            # Method 2: Fallback to search
             request = self.youtube.search().list(
                 part='snippet',
                 q=handle,
@@ -170,7 +185,9 @@ class YouTubeChannelCrawler:
             response = request.execute()
 
             if response.get('items'):
-                return response['items'][0]['snippet']['channelId']
+                channel_id = response['items'][0]['snippet']['channelId']
+                log.info(f"Resolved '{handle}' to channel ID: {channel_id} (via search)")
+                return channel_id
 
         except Exception as e:
             log.error(f"Error resolving channel handle {handle}: {e}")
@@ -325,8 +342,9 @@ class YouTubeChannelCrawler:
             if channel_response.get('items'):
                 custom_url = channel_response['items'][0]['snippet'].get('customUrl')
                 if custom_url:
-                    # Return @handle format
-                    return f"https://youtube.com/@{custom_url}"
+                    # Return @handle format (remove @ prefix if already present)
+                    handle = custom_url.lstrip('@')
+                    return f"https://youtube.com/@{handle}"
 
             # Fallback to channel ID format
             return f"https://youtube.com/channel/{channel_id}"
