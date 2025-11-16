@@ -132,8 +132,30 @@ class IntegratedProcessor:
 
         log.info(f"Processing batch of {len(pending_urls)} URLs")
 
-        # Process concurrently
-        tasks = [self.process_url(url_obj) for url_obj in pending_urls]
+        # Check if batch contains YouTube videos (need rate limiting)
+        youtube_urls = [u for u in pending_urls if u.source_type == 'youtube_video']
+        has_youtube = len(youtube_urls) > 0
+
+        if has_youtube:
+            # YouTube-specific rate limiting to avoid IP bans
+            semaphore = asyncio.Semaphore(settings.youtube_concurrent_workers)
+            log.debug(f"Using YouTube rate limiting: {settings.youtube_concurrent_workers} concurrent, "
+                     f"{settings.youtube_delay_between_requests}s delay")
+
+            async def rate_limited_process(url_obj):
+                """Process with rate limiting for YouTube."""
+                async with semaphore:
+                    result = await self.process_url(url_obj)
+                    # Add delay after processing to avoid burst requests
+                    if url_obj.source_type == 'youtube_video':
+                        await asyncio.sleep(settings.youtube_delay_between_requests)
+                    return result
+
+            tasks = [rate_limited_process(url_obj) for url_obj in pending_urls]
+        else:
+            # Normal processing for other sources (website, GitHub)
+            tasks = [self.process_url(url_obj) for url_obj in pending_urls]
+
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
         # Count results

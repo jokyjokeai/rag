@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     youtube_prioritize_channels: bool = True  # Prioritize channels over individual videos
     youtube_search_masterclass: bool = True  # Include masterclass/long videos in searches
 
+    # YouTube Rate Limiting (avoid IP bans)
+    youtube_concurrent_workers: int = 3  # Max concurrent video scraping (3-5 recommended)
+    youtube_delay_between_requests: float = 1.0  # Delay in seconds between requests (1.0-2.0 recommended)
+
     # Ollama Configuration
     ollama_host: str = "http://localhost:11434"
     ollama_model: str = "mistral:7b"  # For query analysis - better quality

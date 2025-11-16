@@ -3,7 +3,8 @@ Web scraper for documentation and article websites.
 """
 from typing import Dict, Any, Optional
 from datetime import datetime
-import requests
+import asyncio
+from playwright.async_api import async_playwright
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from urllib.parse import urlparse
@@ -17,15 +18,22 @@ class WebScraper(BaseScraper):
     def __init__(self):
         """Initialize web scraper."""
         super().__init__()
-        self.headers = {
-            'User-Agent': 'RAGBot/1.0 (Educational purposes; Knowledge base builder)',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
-        }
 
     def scrape(self, url: str) -> Optional[Dict[str, Any]]:
         """
-        Scrape web page content.
+        Scrape web page content (synchronous wrapper).
+
+        Args:
+            url: URL to scrape
+
+        Returns:
+            Dictionary with page content and metadata
+        """
+        return asyncio.run(self._scrape_async(url))
+
+    async def _scrape_async(self, url: str) -> Optional[Dict[str, Any]]:
+        """
+        Scrape web page content using Playwright.
 
         Args:
             url: URL to scrape
@@ -36,12 +44,32 @@ class WebScraper(BaseScraper):
         log.info(f"Scraping web page: {url}")
 
         try:
-            # Fetch page
-            response = requests.get(url, headers=self.headers, timeout=30)
-            response.raise_for_status()
+            async with async_playwright() as p:
+                # Launch browser
+                browser = await p.chromium.launch(headless=True)
+                page = await browser.new_page()
+
+                # Set user agent
+                await page.set_extra_http_headers({
+                    'User-Agent': 'RAGBot/1.0 (Educational purposes; Knowledge base builder)',
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9,fr;q=0.8',
+                })
+
+                # Navigate to page and wait for content to load
+                await page.goto(url, wait_until='networkidle', timeout=30000)
+
+                # Extra wait for dynamic content (JavaScript rendering)
+                await asyncio.sleep(2)
+
+                # Get HTML content
+                html = await page.content()
+
+                # Close browser
+                await browser.close()
 
             # Parse HTML
-            soup = BeautifulSoup(response.content, 'lxml')
+            soup = BeautifulSoup(html, 'lxml')
 
             # Extract metadata
             metadata = self._extract_metadata(soup, url)
@@ -56,12 +84,7 @@ class WebScraper(BaseScraper):
                 **metadata,
                 'source_type': 'website',
                 'scraped_at': datetime.now().isoformat(),
-                'status_code': response.status_code,
-                'content_type': response.headers.get('content-type', ''),
                 'content_length': len(markdown_content),
-                # HTTP headers for refresh detection
-                'http_last_modified': response.headers.get('Last-Modified'),
-                'http_etag': response.headers.get('ETag')
             }
 
             log.info(f"Scraped {len(markdown_content)} characters from {url}")
@@ -73,7 +96,7 @@ class WebScraper(BaseScraper):
                 success=True
             )
 
-        except requests.exceptions.Timeout:
+        except asyncio.TimeoutError:
             log.error(f"Timeout while scraping {url}")
             return self._create_result(
                 url=url,
@@ -81,16 +104,6 @@ class WebScraper(BaseScraper):
                 metadata={},
                 success=False,
                 error="Request timeout"
-            )
-
-        except requests.exceptions.RequestException as e:
-            log.error(f"Request error for {url}: {e}")
-            return self._create_result(
-                url=url,
-                content="",
-                metadata={},
-                success=False,
-                error=str(e)
             )
 
         except Exception as e:
@@ -156,21 +169,27 @@ class WebScraper(BaseScraper):
         Returns:
             BeautifulSoup object with main content only
         """
-        # Remove unwanted elements
+        import re
+
+        # Remove unwanted elements by tag
         for element in soup(['script', 'style', 'nav', 'header', 'footer',
                             'aside', 'iframe', 'noscript']):
             element.decompose()
 
-        # Remove elements with specific classes/IDs (common patterns)
+        # Remove elements with specific classes/IDs (more precise patterns)
+        # Use word boundaries to avoid false matches like 'gradient' matching 'ad'
         unwanted_patterns = [
-            'nav', 'menu', 'sidebar', 'advertisement', 'ad', 'cookie',
-            'footer', 'header', 'social', 'share', 'comment'
+            r'\bnav\b', r'\bmenu\b', r'\bsidebar\b',
+            r'\badvertisement\b', r'\bcookie\b',
+            r'\bfooter\b', r'\bheader\b',
+            r'\bsocial\b', r'\bshare\b', r'\bcomment\b'
         ]
 
         for pattern in unwanted_patterns:
-            for element in soup.find_all(class_=lambda x: x and pattern in x.lower()):
+            regex = re.compile(pattern, re.IGNORECASE)
+            for element in soup.find_all(class_=lambda x: x and any(regex.search(cls) for cls in (x if isinstance(x, list) else [x]))):
                 element.decompose()
-            for element in soup.find_all(id=lambda x: x and pattern in x.lower()):
+            for element in soup.find_all(id=lambda x: x and regex.search(x)):
                 element.decompose()
 
         # Try to find main content area
@@ -181,6 +200,12 @@ class WebScraper(BaseScraper):
             soup.find('div', id=lambda x: x and 'content' in x.lower()) or
             soup.find('body')
         )
+
+        # If main content is too small (< 500 chars), fall back to body
+        if main_content and len(main_content.get_text()) < 500:
+            body = soup.find('body')
+            if body and len(body.get_text()) > len(main_content.get_text()):
+                main_content = body
 
         return main_content if main_content else soup
 

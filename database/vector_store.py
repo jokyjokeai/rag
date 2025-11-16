@@ -83,11 +83,10 @@ class VectorStore:
             if "does not exist" in str(e).lower():
                 log.warning(f"Collection '{self.collection_name}' not found, recreating...")
 
-                # Recreate the collection
+                # Recreate the collection (same as __init__)
                 self.collection = self.client.get_or_create_collection(
                     name=self.collection_name,
-                    embedding_function=self.embedding_function,
-                    metadata={"hnsw:space": "l2"}
+                    metadata={"description": "Technical knowledge base for RAG"}
                 )
                 log.info(f"Collection '{self.collection_name}' recreated successfully")
 
@@ -138,8 +137,7 @@ class VectorStore:
                 log.warning(f"Collection '{self.collection_name}' not found during search(), recreating...")
                 self.collection = self.client.get_or_create_collection(
                     name=self.collection_name,
-                    embedding_function=self.embedding_function,
-                    metadata={"hnsw:space": "l2"}
+                    metadata={"description": "Technical knowledge base for RAG"}
                 )
                 log.info(f"Collection '{self.collection_name}' recreated successfully")
                 # Return empty results
@@ -226,8 +224,7 @@ class VectorStore:
                 log.warning(f"Collection '{self.collection_name}' not found during count(), recreating...")
                 self.collection = self.client.get_or_create_collection(
                     name=self.collection_name,
-                    embedding_function=self.embedding_function,
-                    metadata={"hnsw:space": "l2"}
+                    metadata={"description": "Technical knowledge base for RAG"}
                 )
                 log.info(f"Collection '{self.collection_name}' recreated successfully")
                 return 0

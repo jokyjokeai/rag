@@ -3,6 +3,8 @@ YouTube scraper for video transcriptions and metadata.
 """
 from typing import Dict, Any, Optional
 from datetime import datetime
+import random
+import time
 from youtube_transcript_api import YouTubeTranscriptApi, TranscriptsDisabled, NoTranscriptFound
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
@@ -46,6 +48,12 @@ class YouTubeScraper(BaseScraper):
             )
 
         log.info(f"Scraping YouTube video: {video_id}")
+
+        # Add random delay to simulate human behavior and avoid rate limiting
+        # Varies the delay to appear more natural (80-120% of configured delay)
+        base_delay = settings.youtube_delay_between_requests
+        random_delay = base_delay * random.uniform(0.8, 1.2)
+        time.sleep(random_delay)
 
         # Get transcript
         transcript_result = self._get_transcript(video_id)

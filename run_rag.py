@@ -165,8 +165,29 @@ async def main():
 
                                 print(f"⚡ Pertinence: {indicator} ({similarity_percent:.1f}%)")
 
-                            print(f"📌 Topics    : {', '.join(meta.get('topics', [])[:3])}")
-                            print(f"🔑 Keywords  : {', '.join(meta.get('keywords', [])[:5])}")
+                            # Handle metadata that may be stored as comma-separated strings
+                            topics = meta.get('topics', '')
+                            if isinstance(topics, str):
+                                # Already a comma-separated string from ChromaDB
+                                topics_display = topics.split(', ')[:3]
+                                topics_str = ', '.join(topics_display) if topics_display else ''
+                            elif isinstance(topics, list):
+                                topics_str = ', '.join(topics[:3])
+                            else:
+                                topics_str = ''
+
+                            keywords = meta.get('keywords', '')
+                            if isinstance(keywords, str):
+                                # Already a comma-separated string from ChromaDB
+                                keywords_display = keywords.split(', ')[:5]
+                                keywords_str = ', '.join(keywords_display) if keywords_display else ''
+                            elif isinstance(keywords, list):
+                                keywords_str = ', '.join(keywords[:5])
+                            else:
+                                keywords_str = ''
+
+                            print(f"📌 Topics    : {topics_str}")
+                            print(f"🔑 Keywords  : {keywords_str}")
                             print(f"📊 Difficulty: {meta.get('difficulty', 'N/A')}")
                             print()
                             print(f"📝 Résumé : {meta.get('summary', 'N/A')}")
